@@ -425,7 +425,7 @@ def menu_inicial():
                     sys.exit()
 
         TELA.fill(PRETO)
-        titulo_texto = fonte_titulo.render("3D Space Shooter", True, BRANCO)
+        titulo_texto = fonte_titulo.render("Py Space Shooter", True, BRANCO)
         start_texto = fonte_menu.render("Pressione Enter para Iniciar", True, BRANCO)
         quit_texto = fonte_menu.render("Pressione Esc para Sair", True, BRANCO)
 
