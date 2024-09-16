@@ -13,7 +13,7 @@ pygame.mixer.init(frequency=44100, size=-16, channels=2)  # Usando estéreo
 LARGURA = 800
 ALTURA = 600
 TELA = pygame.display.set_mode((LARGURA, ALTURA))
-pygame.display.set_caption("3D Space Shooter")
+pygame.display.set_caption("Py Space Shooter")
 
 # Definição de cores
 PRETO = (0, 0, 0)
