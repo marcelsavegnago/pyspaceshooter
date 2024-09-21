@@ -29,7 +29,7 @@ menu_font = pygame.font.Font('fonts/space_font.ttf', 40)
 game_font = pygame.font.Font('fonts/space_font.ttf', 24)
 
 def save_score(name, score):
-    """Save player's score to a JSON file.
+    """Save the player's score to a JSON file.
 
     Args:
         name (str): Player's initials.
@@ -47,7 +47,7 @@ def save_score(name, score):
         print(f"Error saving score: {e}")
 
 def load_ranking():
-    """Load rankings from a JSON file.
+    """Load the ranking from a JSON file.
 
     Returns:
         list: Sorted list of dictionaries with keys 'name' and 'score'.
@@ -79,8 +79,12 @@ class Game:
         self.player_initials = ""
         self.difficulty = 'Normal'  # Default difficulty
 
+        # Variables for screen shake effect
+        self.shake_timer = 0
+        self.shake_intensity = 0
+
         # Load sounds
-        # Ensure the sound files are in the 'sounds' directory
+        # Ensure sound files are in the 'sounds' directory
         self.shot_sound = pygame.mixer.Sound('sounds/shot.ogg')
         self.explosion_sound = pygame.mixer.Sound('sounds/explosion.ogg')
         self.powerup_sound = pygame.mixer.Sound('sounds/powerup.ogg')
@@ -116,7 +120,7 @@ class Game:
         self.run()
 
     def run(self):
-        """Game loop."""
+        """Main game loop."""
         self.playing = True
         while self.playing:
             delta_time = self.clock.tick(60) / 1000  # Convert milliseconds to seconds
@@ -173,6 +177,13 @@ class Game:
             self.powerups.add(powerup)
             self.next_powerup_time = random.randint(500, 1000)
 
+        # Decrease screen shake timer
+        if self.shake_timer > 0:
+            self.shake_timer -= delta_time
+            if self.shake_timer <= 0:
+                self.shake_timer = 0
+                self.shake_intensity = 0  # Reset intensity when shake ends
+
         # Collision detection with masks for pixel-perfect collisions
         collision = pygame.sprite.groupcollide(
             self.enemies, self.projectiles, True, True, pygame.sprite.collide_mask)
@@ -183,6 +194,12 @@ class Game:
                 self.all_sprites.add(enemy_explosion)
                 self.explosions.add(enemy_explosion)
                 self.explosion_sound.play()
+                # Start screen shake with reduced intensity (70% of 10 is 7)
+                # Only increase intensity and timer if they are lower
+                if self.shake_intensity < 7:
+                    self.shake_intensity = 7
+                if self.shake_timer < 0.3:
+                    self.shake_timer = 0.3
 
         if pygame.sprite.spritecollide(self.player, self.enemy_projectiles, True, pygame.sprite.collide_mask):
             if self.player.shield > 0:
@@ -222,15 +239,34 @@ class Game:
                 self.all_sprites.add(explosion)
                 self.explosions.add(explosion)
                 self.explosion_sound.play()
+                # Start screen shake with full intensity
+                self.shake_timer = 0.5  # Duration in seconds
+                self.shake_intensity = 10  # Intensity in pixels
             elif powerup.type == 'shield':
                 self.player.shield = 3
 
     def draw(self):
         """Draw everything on the screen."""
-        SCREEN.fill(BLACK)
-        self.starry_background.draw(SCREEN)
-        self.all_sprites.draw(SCREEN)
+        # Create a temporary surface
+        temp_surface = pygame.Surface((WIDTH, HEIGHT))
+        temp_surface.fill(BLACK)
 
+        # Draw the starry background and sprites on the temporary surface
+        self.starry_background.draw(temp_surface)
+        self.all_sprites.draw(temp_surface)
+
+        # Apply screen shake effect
+        if self.shake_timer > 0:
+            shake_offset_x = random.randint(-self.shake_intensity, self.shake_intensity)
+            shake_offset_y = random.randint(-self.shake_intensity, self.shake_intensity)
+        else:
+            shake_offset_x = 0
+            shake_offset_y = 0
+
+        # Blit the temporary surface onto the main screen with offset
+        SCREEN.blit(temp_surface, (shake_offset_x, shake_offset_y))
+
+        # Draw UI elements directly on the main screen
         score_text = game_font.render(f"Score: {self.score}", True, WHITE)
         lives_text = game_font.render(f"Lives: {self.player.lives}", True, WHITE)
         level_text = game_font.render(f"Level: {self.level}", True, WHITE)
@@ -417,7 +453,7 @@ class Game:
             self.clock.tick(60)
 
     def game_over(self):
-        """Display the game over screen and save score."""
+        """Display the game over screen and save the score."""
         save_score(self.player_initials, self.score)
         ranking = load_ranking()
 
@@ -442,7 +478,7 @@ class Game:
             restart_text = menu_font.render("Press Enter to Restart", True, WHITE)
             quit_text = menu_font.render("Press Esc to Exit", True, WHITE)
 
-            # Display title and options on screen
+            # Display title and options on the screen
             SCREEN.blit(game_over_text, ((WIDTH - game_over_text.get_width()) / 2, 50))
             SCREEN.blit(score_text, ((WIDTH - score_text.get_width()) / 2, 150))
             SCREEN.blit(restart_text, ((WIDTH - restart_text.get_width()) / 2, 500))
@@ -452,11 +488,11 @@ class Game:
             ranking_title = menu_font.render("Ranking - Top 5", True, WHITE)
             SCREEN.blit(ranking_title, (WIDTH // 4, 200))
 
-            # Display ranking with highlight for the player
+            # Display the ranking with highlight for the player
             for i, entry in enumerate(ranking[:5]):
                 name = entry['name']
                 points = entry['score']
-                color = WHITE if name != self.player_initials else YELLOW  # Highlight for current player
+                color = WHITE if name != self.player_initials else YELLOW  # Highlight current player
                 ranking_line = game_font.render(f"{i + 1}. {name} - {points}", True, color)
                 SCREEN.blit(ranking_line, (WIDTH // 4, 250 + i * 40))  # Space between lines
 
@@ -464,7 +500,7 @@ class Game:
             self.clock.tick(60)
 
     def capture_initials(self):
-        """Capture player's initials."""
+        """Capture the player's initials."""
         initials = ""
         capturing = True
         while capturing:
@@ -501,7 +537,7 @@ class StarryBackground:
             num_stars (int): Number of stars per layer.
         """
         self.layers = []
-        for i in range(3):  # Three layers for the parallax effect
+        for i in range(3):  # Three layers for parallax effect
             stars = []
             for _ in range(num_stars):
                 x = random.randrange(0, WIDTH)
@@ -522,7 +558,7 @@ class StarryBackground:
                     star[2] = random.choice([1, 2])
 
     def draw(self, screen):
-        """Draw stars on the screen.
+        """Draw the stars on the screen.
 
         Args:
             screen (pygame.Surface): The screen to draw on.
@@ -552,7 +588,7 @@ class Player(pygame.sprite.Sprite):
         self.mask = pygame.mask.from_surface(self.image)
 
     def update(self, delta_time):
-        """Update player position and rotation."""
+        """Update the player's position and rotation."""
         keys = pygame.key.get_pressed()
         rotation_speed = 200  # Degrees per second
         acceleration = 300     # Pixels per second squared
@@ -590,14 +626,14 @@ class Player(pygame.sprite.Sprite):
 
     def shoot(self, game):
         """Fire a projectile.
-    
+
         Args:
             game (Game): The game instance to access sounds and sprite groups.
         """
         rad = math.radians(self.angle)
         direction = pygame.math.Vector2(-math.sin(rad), -math.cos(rad))
         front_tip = self.pos + direction * 25
-    
+
         if self.weapon_level == 1:
             projectile = Projectile(front_tip, direction * 500, self.angle)
             game.all_sprites.add(projectile)
@@ -618,7 +654,7 @@ class Player(pygame.sprite.Sprite):
                 projectile = Projectile(front_tip, direction_offset * 500, self.angle + a)
                 game.all_sprites.add(projectile)
                 game.projectiles.add(projectile)
-    
+
         game.shot_sound.play()
 
 class Projectile(pygame.sprite.Sprite):
@@ -719,7 +755,6 @@ class ShooterEnemy(Enemy):
         self.game.all_sprites.add(projectile)
         self.game.enemy_projectiles.add(projectile)
 
-
 class EnemyProjectile(pygame.sprite.Sprite):
     """Class for enemy projectiles."""
 
@@ -734,7 +769,7 @@ class EnemyProjectile(pygame.sprite.Sprite):
         super().__init__()
         # Load the projectile image
         self.image_orig = pygame.image.load('images/enemy_laser.png').convert_alpha()
-        self.image_orig = pygame.transform.scale(self.image_orig, (9, ))
+        self.image_orig = pygame.transform.scale(self.image_orig, (9, 30))  # Corrected size
         # Rotate the image by the angle
         self.image = pygame.transform.rotate(self.image_orig, angle)
         self.rect = self.image.get_rect(center=position)
@@ -805,7 +840,7 @@ class Explosion(pygame.sprite.Sprite):
         super().__init__()
         # Load explosion animation frames
         self.frames = []
-        for i in range(9):  # Assuming you have 9 frames named explosion0.png to explosion8.png
+        for i in range(9):  # Ensure you have 9 frames named explosion0.png to explosion8.png
             frame = pygame.image.load(f'images/explosion{i}.png').convert_alpha()
             frame = pygame.transform.scale(frame, (75, 75))
             self.frames.append(frame)
