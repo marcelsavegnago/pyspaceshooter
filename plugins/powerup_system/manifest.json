@@ -1,0 +1,5 @@
+{
+    "name": "powerup_system",
+    "description": "Provides the infrastructure for power-ups.",
+    "dependencies": []
+}

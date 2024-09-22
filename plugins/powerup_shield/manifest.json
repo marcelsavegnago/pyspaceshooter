@@ -1,0 +1,5 @@
+{
+    "name": "powerup_shield",
+    "description": "Adds a shield power-up that grants the player temporary protection.",
+    "dependencies": ["powerup_system"]
+}
