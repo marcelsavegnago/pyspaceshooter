@@ -1,0 +1,5 @@
+{
+    "name": "powerup_bomb",
+    "description": "Adds a bomb power-up that destroys all enemies on the screen.",
+    "dependencies": ["powerup_system"]
+}

@@ -4,6 +4,9 @@ import math
 import random
 import json
 import os
+import importlib.util
+
+from collections import defaultdict
 
 # Initialize Pygame
 pygame.init()
@@ -63,6 +66,87 @@ def load_ranking():
         print(f"Error loading ranking: {e}")
         return []
 
+def load_plugins(game):
+    """Load plugins from the 'plugins' directory, respecting dependencies.
+
+    Args:
+        game (Game): The game instance to pass to plugins.
+    """
+    plugins_dir = 'plugins'
+    if not os.path.exists(plugins_dir):
+        os.makedirs(plugins_dir)
+
+    # Step 1: Scan plugin directories and read manifests
+    plugin_manifests = {}
+    plugin_dirs = [d for d in os.listdir(plugins_dir) if os.path.isdir(os.path.join(plugins_dir, d))]
+
+    for plugin_name in plugin_dirs:
+        manifest_path = os.path.join(plugins_dir, plugin_name, 'manifest.json')
+        if os.path.exists(manifest_path):
+            with open(manifest_path, 'r') as f:
+                manifest = json.load(f)
+                manifest['path'] = os.path.join(plugins_dir, plugin_name)
+                plugin_manifests[plugin_name] = manifest
+        else:
+            print(f"Manifest file missing for plugin '{plugin_name}'. Skipping.")
+    
+    # Step 2: Build dependency graph
+    dependency_graph = defaultdict(list)
+    for plugin_name, manifest in plugin_manifests.items():
+        dependencies = manifest.get('dependencies', [])
+        for dep in dependencies:
+            if dep in plugin_manifests:
+                dependency_graph[dep].append(plugin_name)
+            else:
+                print(f"Dependency '{dep}' for plugin '{plugin_name}' not found.")
+                # Handle missing dependencies as needed (skip plugin, raise error, etc.)
+                # For this example, we'll skip the plugin with missing dependencies
+                del plugin_manifests[plugin_name]
+                break
+    
+    # Step 3: Determine loading order using topological sort
+    loading_order = []
+    visited = {}
+    temp_mark = set()
+
+    def visit(n):
+        if n in temp_mark:
+            raise Exception(f"Circular dependency detected: {n}")
+        if n not in visited:
+            temp_mark.add(n)
+            for m in dependency_graph.get(n, []):
+                visit(m)
+            temp_mark.remove(n)
+            visited[n] = True
+            loading_order.append(n)
+    
+    try:
+        for plugin_name in plugin_manifests.keys():
+            visit(plugin_name)
+    except Exception as e:
+        print(f"Error determining plugin loading order: {e}")
+        sys.exit(1)
+    
+    # Reverse loading order to load dependencies first
+    loading_order.reverse()
+
+    # Step 4: Load plugins in order
+    for plugin_name in loading_order:
+        manifest = plugin_manifests[plugin_name]
+        plugin_path = manifest['path']
+        main_py_path = os.path.join(plugin_path, 'main.py')
+        spec = importlib.util.spec_from_file_location(plugin_name, main_py_path)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+            if hasattr(module, 'register'):
+                module.register(game)
+                print(f"Loaded plugin: {plugin_name}")
+            else:
+                print(f"Plugin '{plugin_name}' does not have a 'register' function.")
+        except Exception as e:
+            print(f"Error loading plugin '{plugin_name}': {e}")
+
 class Game:
     """Main game class to encapsulate the game logic and state."""
 
@@ -74,7 +158,6 @@ class Game:
         self.score = 0
         self.level = 1
         self.level_counter = 0
-        self.next_powerup_time = random.randint(500, 1000)
         self.starry_background = StarryBackground(50)
         self.player_initials = ""
         self.difficulty = 'Normal'  # Default difficulty
@@ -102,21 +185,45 @@ class Game:
         pygame.mixer.music.set_volume(0.5)
         pygame.mixer.music.play(-1)  # Loop indefinitely
 
+        # Plugins list and callbacks
+        self.plugins = []
+        self.plugin_updates = []
+        self.plugin_events = []
+        self.plugin_draws = []
+
+        # Expose screen dimensions
+        self.WIDTH = WIDTH
+        self.HEIGHT = HEIGHT
+
+    def register_plugin(self, plugin):
+        """Register a plugin and its callbacks."""
+        self.plugins.append(plugin)
+        if hasattr(plugin, 'update'):
+            self.plugin_updates.append(plugin.update)
+        if hasattr(plugin, 'handle_event'):
+            self.plugin_events.append(plugin.handle_event)
+        if hasattr(plugin, 'draw'):
+            self.plugin_draws.append(plugin.draw)
+
     def new(self):
         """Start a new game."""
         self.all_sprites = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
         self.projectiles = pygame.sprite.Group()
         self.enemy_projectiles = pygame.sprite.Group()
-        self.powerups = pygame.sprite.Group()
         self.explosions = pygame.sprite.Group()
+        self.powerups = pygame.sprite.Group()  # Moved to plugins, but initialize here for safety
         self.score = 0
         self.level = 1
         self.level_counter = 0
-        self.next_powerup_time = random.randint(500, 1000)
         self.player = Player()
         self.all_sprites.add(self.player)
         self.starry_background = StarryBackground(50)
+
+        self.Explosion = Explosion  # Expose Explosion class to plugins
+        
+        # Load plugins after initializing player and other attributes
+        load_plugins(self)
         self.run()
 
     def run(self):
@@ -140,6 +247,9 @@ class Game:
                     self.player.shoot(self)
                 elif event.key == pygame.K_ESCAPE:
                     self.pause_menu()
+            # Call plugin event handlers
+            for plugin_event in self.plugin_events:
+                plugin_event(self, event)
 
     def update(self, delta_time):
         """Update game state."""
@@ -160,22 +270,9 @@ class Game:
             spawn_rate = max(60 - self.level * 2, 10)
 
         if random.randint(1, spawn_rate) == 1:
-            enemy_type = random.choice(['normal', 'shooter']) if self.level >= 3 else 'normal'
-            if enemy_type == 'normal':
-                enemy = Enemy(self.level)
-            else:
-                enemy = ShooterEnemy(self, self.level, self.player)
+            enemy = Enemy(self.level)
             self.all_sprites.add(enemy)
             self.enemies.add(enemy)
-
-        self.next_powerup_time -= 1
-        if self.next_powerup_time <= 0:
-            powerup_type = random.choice(['weapon', 'bomb', 'shield'])
-            position = (random.randint(20, WIDTH - 20), -20)
-            powerup = PowerUp(powerup_type, position)
-            self.all_sprites.add(powerup)
-            self.powerups.add(powerup)
-            self.next_powerup_time = random.randint(500, 1000)
 
         # Decrease screen shake timer
         if self.shake_timer > 0:
@@ -194,8 +291,7 @@ class Game:
                 self.all_sprites.add(enemy_explosion)
                 self.explosions.add(enemy_explosion)
                 self.explosion_sound.play()
-                # Start screen shake with reduced intensity (70% of 10 is 7)
-                # Only increase intensity and timer if they are lower
+                # Start screen shake with reduced intensity
                 if self.shake_intensity < 7:
                     self.shake_intensity = 7
                 if self.shake_timer < 0.3:
@@ -221,29 +317,9 @@ class Game:
                 if self.player.lives <= 0:
                     self.playing = False
 
-        powerup_collision = pygame.sprite.spritecollide(
-            self.player, self.powerups, True, pygame.sprite.collide_mask)
-        for powerup in powerup_collision:
-            self.powerup_sound.play()
-            if powerup.type == 'weapon':
-                self.player.weapon_level += 1
-                self.player.powerup_timer = 600
-            elif powerup.type == 'bomb':
-                for enemy in self.enemies:
-                    enemy_explosion = Explosion(enemy.rect.center)
-                    self.all_sprites.add(enemy_explosion)
-                    self.explosions.add(enemy_explosion)
-                    enemy.kill()
-                    self.score += 10
-                explosion = Explosion(self.player.rect.center)
-                self.all_sprites.add(explosion)
-                self.explosions.add(explosion)
-                self.explosion_sound.play()
-                # Start screen shake with full intensity
-                self.shake_timer = 0.5  # Duration in seconds
-                self.shake_intensity = 10  # Intensity in pixels
-            elif powerup.type == 'shield':
-                self.player.shield = 3
+        # Call plugin update functions
+        for plugin_update in self.plugin_updates:
+            plugin_update(self, delta_time)
 
     def draw(self):
         """Draw everything on the screen."""
@@ -283,6 +359,10 @@ class Game:
         if self.player.shield > 0:
             shield_text = game_font.render(f"Shield: {self.player.shield}", True, WHITE)
             SCREEN.blit(shield_text, (x_offset, 60))
+
+        # Call plugin draw functions
+        for plugin_draw in self.plugin_draws:
+            plugin_draw(self, SCREEN)
 
         pygame.display.flip()
 
@@ -585,14 +665,15 @@ class Player(pygame.sprite.Sprite):
         self.weapon_level = 1
         self.powerup_timer = 0
         self.shield = 0
+        self.speed_multiplier = 1.0  # For speed boost power-up
         self.mask = pygame.mask.from_surface(self.image)
 
     def update(self, delta_time):
         """Update the player's position and rotation."""
         keys = pygame.key.get_pressed()
         rotation_speed = 200  # Degrees per second
-        acceleration = 300     # Pixels per second squared
-        max_speed = 300        # Pixels per second
+        acceleration = 300 * self.speed_multiplier    # Pixels per second squared
+        max_speed = 300 * self.speed_multiplier       # Pixels per second
         friction = 0.95
 
         if keys[pygame.K_LEFT]:
@@ -619,10 +700,16 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=self.rect.center)
         self.mask = pygame.mask.from_surface(self.image)
 
+        # Handle power-up timers
         if self.powerup_timer > 0:
             self.powerup_timer -= 1
             if self.powerup_timer == 0:
-                self.weapon_level = 1
+                self.weapon_level = 1  # Reset weapon level
+
+        if hasattr(self, 'speed_boost_timer') and self.speed_boost_timer > 0:
+            self.speed_boost_timer -= 1
+            if self.speed_boost_timer == 0:
+                self.speed_multiplier = 1.0  # Reset speed multiplier
 
     def shoot(self, game):
         """Fire a projectile.
@@ -717,116 +804,6 @@ class Enemy(pygame.sprite.Sprite):
 
         if self.rect.top > HEIGHT:
             self.kill()
-
-class ShooterEnemy(Enemy):
-    """Class for enemies that shoot projectiles."""
-
-    def __init__(self, game, level, player):
-        """Initialize the shooter enemy.
-
-        Args:
-            game (Game): The game instance.
-            level (int): Current game level.
-            player (Player): The player object to target.
-        """
-        super().__init__(level)
-        # Replace 'images/shooter_enemy.png' with the path to your shooter enemy image
-        self.image_orig = pygame.image.load('images/shooter_enemy.png').convert_alpha()
-        self.image_orig = pygame.transform.scale(self.image_orig, (50, 50))
-        self.image = self.image_orig.copy()
-        self.shoot_timer = random.randint(60, 120)
-        self.player = player
-        self.game = game
-        self.mask = pygame.mask.from_surface(self.image)
-
-    def update(self, delta_time):
-        """Update shooter enemy position and check if it should shoot."""
-        super().update(delta_time)
-        self.shoot_timer -= 1
-        if self.shoot_timer <= 0:
-            self.shoot()
-            self.shoot_timer = random.randint(60, 120)
-
-    def shoot(self):
-        """Fire a projectile toward the player."""
-        direction = (self.player.pos - self.pos).normalize()
-        angle = math.degrees(math.atan2(-direction.y, -direction.x)) + 90
-        projectile = EnemyProjectile(self.pos, direction * 300, angle)
-        self.game.all_sprites.add(projectile)
-        self.game.enemy_projectiles.add(projectile)
-
-class EnemyProjectile(pygame.sprite.Sprite):
-    """Class for enemy projectiles."""
-
-    def __init__(self, position, velocity, angle):
-        """Initialize the enemy projectile.
-
-        Args:
-            position (tuple): Starting position of the projectile.
-            velocity (pygame.math.Vector2): Velocity vector of the projectile.
-            angle (float): Angle at which the projectile is fired.
-        """
-        super().__init__()
-        # Load the projectile image
-        self.image_orig = pygame.image.load('images/enemy_laser.png').convert_alpha()
-        self.image_orig = pygame.transform.scale(self.image_orig, (9, 30))  # Corrected size
-        # Rotate the image by the angle
-        self.image = pygame.transform.rotate(self.image_orig, angle)
-        self.rect = self.image.get_rect(center=position)
-        self.pos = pygame.math.Vector2(position)
-        self.velocity = velocity
-        self.mask = pygame.mask.from_surface(self.image)
-
-    def update(self, delta_time):
-        """Update enemy projectile position."""
-        self.pos += self.velocity * delta_time
-        self.rect.center = self.pos
-
-        if (self.rect.right < 0 or self.rect.left > WIDTH or
-                self.rect.bottom < 0 or self.rect.top > HEIGHT):
-            self.kill()
-
-class PowerUp(pygame.sprite.Sprite):
-    """Class for power-ups."""
-
-    def __init__(self, type_, position):
-        """Initialize the power-up.
-
-        Args:
-            type_ (str): Type of power-up ('weapon', 'bomb', 'shield').
-            position (tuple): Starting position of the power-up.
-        """
-        super().__init__()
-        self.type = type_
-        # Load the appropriate image based on the power-up type
-        if self.type == 'weapon':
-            image_path = 'images/powerup_weapon.png'
-        elif self.type == 'bomb':
-            image_path = 'images/powerup_bomb.png'
-        elif self.type == 'shield':
-            image_path = 'images/powerup_shield.png'
-        else:
-            image_path = 'images/powerup.png'  # Default power-up image
-
-        self.image_orig = pygame.image.load(image_path).convert_alpha()
-        self.image_orig = pygame.transform.scale(self.image_orig, (30, 30))
-        self.image = self.image_orig.copy()
-        self.rect = self.image.get_rect(center=position)
-        self.velocity = pygame.math.Vector2(0, 100)
-        self.angle = 0  # For rotation animation
-        self.rotation_speed = 100  # Degrees per second
-        self.mask = pygame.mask.from_surface(self.image)
-
-    def update(self, delta_time):
-        """Update power-up position."""
-        self.rect.move_ip(self.velocity.x * delta_time, self.velocity.y * delta_time)
-        if self.rect.top > HEIGHT:
-            self.kill()
-
-        self.angle = (self.angle + self.rotation_speed * delta_time) % 360
-        self.image = pygame.transform.rotate(self.image_orig, self.angle)
-        self.rect = self.image.get_rect(center=self.rect.center)
-        self.mask = pygame.mask.from_surface(self.image)
 
 class Explosion(pygame.sprite.Sprite):
     """Class for explosions."""
