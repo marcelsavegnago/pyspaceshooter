@@ -1,0 +1,5 @@
+{
+    "name": "powerup_weapon",
+    "description": "Adds a weapon power-up that enhances the player's weapons.",
+    "dependencies": ["powerup_system"]
+}
