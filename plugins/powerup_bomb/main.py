@@ -7,6 +7,7 @@ def register(game):
     powerup_system = getattr(game, 'powerup_system', None)
     if powerup_system:
         powerup_system.register_powerup('bomb', BombPowerUp)
+        print("Bomb power-up registered with BombPowerUp.")
     else:
         print("PowerUpSystem not found. Ensure 'powerup_system' plugin is loaded before 'powerup_bomb'.")
 
@@ -16,7 +17,7 @@ class BombPowerUp(pygame.sprite.Sprite):
         self.game = game
         image_path = os.path.join(os.path.dirname(__file__), 'images', 'powerup_bomb.png')
         if not os.path.exists(image_path):
-            image_path = os.path.join('images', 'powerup.png')  # Default image in main images directory
+            image_path = os.path.join('images', 'powerup.png')  # Imagem padrão no diretório principal
         self.image_orig = pygame.image.load(image_path).convert_alpha()
         self.image_orig = pygame.transform.scale(self.image_orig, (30, 30))
         self.image = self.image_orig.copy()
@@ -42,11 +43,11 @@ class BombPowerUp(pygame.sprite.Sprite):
             game.explosions.add(enemy_explosion)
             enemy.kill()
             game.score += 10
-        # Create an explosion at the player's position
+        # Criar uma explosão na posição do jogador
         explosion = game.Explosion(game.player.rect.center)
         game.all_sprites.add(explosion)
         game.explosions.add(explosion)
         game.explosion_sound.play()
-        # Start screen shake with full intensity
+        # Iniciar a vibração da tela com intensidade máxima
         game.shake_timer = 0.5
         game.shake_intensity = 10

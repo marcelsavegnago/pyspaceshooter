@@ -3,17 +3,37 @@
 import pygame
 import random
 
+class Effect:
+    """Base class for effects applied to the player."""
+    def __init__(self, duration):
+        self.duration = duration  # Duration of the effect in seconds
+        self.remaining_time = duration
+
+    def apply(self, player):
+        """Apply the effect to the player."""
+        pass
+
+    def update(self, delta_time, player):
+        """Update the effect, decreasing the remaining time."""
+        self.remaining_time -= delta_time
+        if self.remaining_time <= 0:
+            self.remove(player)
+            return False
+        return True
+
+    def remove(self, player):
+        """Remove the effect from the player."""
+        pass
+
 def register(game):
     powerup_system = PowerUpSystem(game)
     game.register_plugin(powerup_system)
-    # Expose the powerup_system instance for other plugins
     game.powerup_system = powerup_system
 
 class PowerUpSystem:
     def __init__(self, game):
         self.game = game
         self.powerups = pygame.sprite.Group()
-        self.game.all_sprites.add(self.powerups)
         self.powerup_types = {}
         self.next_powerup_time = random.randint(500, 1000)
 
@@ -41,10 +61,11 @@ class PowerUpSystem:
             game.player, self.powerups, True, pygame.sprite.collide_mask)
         for powerup in powerup_collision:
             powerup.apply(game)
-            game.powerup_sound.play()
+            if hasattr(game, 'powerup_sound'):
+                game.powerup_sound.play()
 
     def handle_event(self, game, event):
-        pass  # Implement if needed
+        pass
 
     def draw(self, game, screen):
-        pass  # Implement if needed
+        pass
